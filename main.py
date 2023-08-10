@@ -182,10 +182,8 @@ def send_log(user_id: str, prompt: str, payload: str) -> None:
         "response": payload,
         "keyword": keyword,
     }
-
-    # 辞書をJSON文字列に変換する
-    json_data = json.dumps(data)
-    logger.log_struct(json.loads(json_data))
+    
+    logger.log_struct(data)
 
 
 def post_message_if_not_from_bot(

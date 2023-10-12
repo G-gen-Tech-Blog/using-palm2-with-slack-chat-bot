@@ -3,8 +3,8 @@ import pickle
 
 from fastapi import FastAPI, Request
 from google.cloud import logging
-from slack_bolt import App
-from slack_bolt.adapter.fastapi import SlackRequestHandler
+from slack_bolt.async_app import AsyncApp
+from slack_bolt.adapter.fastapi.async_handler import AsyncSlackRequestHandler
 from slack_sdk import WebClient
 import vertexai
 from vertexai.language_models import ChatModel, InputOutputTextPair, TextGenerationModel
@@ -25,8 +25,8 @@ HISTORICAL_CHAT_BUCKET_NAME = "historical-chat-object"
 
 # Flask
 
-app = App(token=SLACK_TOKEN, signing_secret=SIGNING_SECRET)
-app_handler = SlackRequestHandler(app)
+app = AsyncApp(token=SLACK_TOKEN, signing_secret=SIGNING_SECRET)
+app_handler = AsyncSlackRequestHandler(app)
 
 
 api = FastAPI()
@@ -158,7 +158,7 @@ def post_message_if_not_from_bot(
 
 
 @app.event("message")
-def handle_incoming_message(payload: dict) -> None:
+async def handle_incoming_message(payload: dict) -> None:
     """
     受信メッセージを処理する
 

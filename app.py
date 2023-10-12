@@ -108,25 +108,22 @@ async def post_message_if_not_from_bot(
         HISTORICAL_CHAT_BUCKET_NAME, historical_chat_blob_name
     )
     is_existing_thread = historical_chat_blob.exists()
+
+    message_history = []
     if is_existing_thread:
         # チャット履歴が存在すれば、過去のチャット履歴をダウンロードし、chat_model に投入し、チャットのセッション再開
 
         serialized_historical_chat = historical_chat_blob.download_as_bytes()
         # 履歴のオブジェクトを逆シリアル化
         historical_chat = pickle.loads(serialized_historical_chat)
-        this_prompt_context = f"{RESPONSE_STYLE}"
-        # 過去のcontext及びチャット履歴を引数にチャット開始のオブジェクトを作成し、チャットのセッション再開
-        chat = chat_model.start_chat(
-            context=this_prompt_context,
-            examples=examples,
-            message_history=historical_chat["historical_chat"],
-        )
-    else:
-        # チャット履歴が存在しなければ、チャット履歴がない状態で新しいチャットセッションを作成
-        this_prompt_context = f"{RESPONSE_STYLE}"
-        # 生成したcontext及を引数にチャット開始のオブジェクトを作成し、チャットのセッション開始
-        chat = chat_model.start_chat(context=this_prompt_context, examples=examples)
+        message_history = historical_chat["historical_chat"]
 
+    this_prompt_context = f"{RESPONSE_STYLE}"
+    chat = chat_model.start_chat(
+        context=this_prompt_context,
+        examples=examples,
+        message_history=message_history,
+    )
     response = chat.send_message(prompt, **PARAMETERS)
 
     # ブロックされたか確認する

@@ -5,7 +5,9 @@ from fastapi import FastAPI, Request
 from google.cloud import logging
 from slack_bolt.async_app import AsyncApp
 from slack_bolt.adapter.fastapi.async_handler import AsyncSlackRequestHandler
-from slack_sdk import WebClient
+from slack_sdk.web.async_client import AsyncWebClient
+
+# from slack_sdk import WebClient
 import vertexai
 from vertexai.language_models import ChatModel, InputOutputTextPair, TextGenerationModel
 
@@ -23,21 +25,15 @@ RESOURCE_LOCATION = "us-central1"
 
 HISTORICAL_CHAT_BUCKET_NAME = "historical-chat-object"
 
-# Flask
-
+# FastAPI
 app = AsyncApp(token=SLACK_TOKEN, signing_secret=SIGNING_SECRET)
 app_handler = AsyncSlackRequestHandler(app)
-
-
 api = FastAPI()
 
 
 @api.post("/slack/events")
 async def endpoint(req: Request):
     return await app_handler.handle(req)
-
-
-slack_client = WebClient(token=SLACK_TOKEN)
 
 
 # VertexAIを初期化
@@ -54,7 +50,6 @@ PARAMETERS = {
 
 RESPONSE_STYLE = """"""
 
-
 # cloud logging
 logging_client = logging.Client()
 
@@ -64,11 +59,8 @@ logger_name = "palm2_slack_chatbot"
 # cloud logging: ロガーを選択する
 logger = logging_client.logger(logger_name)
 
-
-sample_raws = []
-
-
 # 入力出力例を準備
+sample_raws = []
 with open("./samples/sample_input-output_pairs.jsonl", "r", encoding="utf-8-sig") as f:
     for line in f:
         sample_raws.append(json.loads(line))
@@ -85,8 +77,13 @@ for item in sample_raws:
 # 本動作はここから
 
 
-def post_message_if_not_from_bot(
-    ts: str, conversation_thread: str, user_id: str, channel_id: str, prompt: str
+async def post_message_if_not_from_bot(
+    client: AsyncWebClient,
+    ts: str,
+    conversation_thread: str,
+    user_id: str,
+    channel_id: str,
+    prompt: str,
 ) -> None:
     """
     ユーザーIDがボットのIDまたはNoneでなく、かつチャンネルIDが存在する場合、Slackチャンネルにメッセージを投稿する。
@@ -143,7 +140,7 @@ def post_message_if_not_from_bot(
         payload = utils.remove_markdown(response.text)
 
     # レスポンスをslackへ返す
-    slack_client.chat_postMessage(channel=channel_id, thread_ts=ts, text=payload)
+    await client.chat_postMessage(channel=channel_id, thread_ts=ts, text=payload)
 
     gc_utils.store_historical_chat_to_gcs(
         """dummy_metadata_chat""",
@@ -158,7 +155,7 @@ def post_message_if_not_from_bot(
 
 
 @app.event("message")
-async def handle_incoming_message(payload: dict) -> None:
+async def handle_incoming_message(client: AsyncWebClient, payload: dict) -> None:
     """
     受信メッセージを処理する
 
@@ -173,4 +170,6 @@ async def handle_incoming_message(payload: dict) -> None:
     ts = payload.get("ts")
     thread_ts = payload.get("thread_ts")
     conversation_thread = ts if thread_ts is None else thread_ts
-    post_message_if_not_from_bot(ts, conversation_thread, user_id, channel_id, prompt)
+    await post_message_if_not_from_bot(
+        client, ts, conversation_thread, user_id, channel_id, prompt
+    )

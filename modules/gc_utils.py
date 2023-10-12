@@ -1,16 +1,9 @@
-import json
-import re
-
-from flask import Flask
-from google.auth import default
-from google.cloud import logging
 from google.cloud import secretmanager
 from googleapiclient import discovery
-import slack
-from slackeventsapi import SlackEventAdapter
-
-import vertexai
-from vertexai.language_models import TextGenerationModel
+from google.cloud import storage
+from google.cloud.storage import Blob
+from google.auth import default
+from modules import utils
 
 
 def get_project_number() -> tuple:
@@ -54,56 +47,36 @@ def access_secret_version(
     return response.payload.data.decode("UTF-8")
 
 
-# 環境変数を読み込む
-PROJECT_ID, PROJECT_NO = get_project_number()
-SIGNING_SECRET = access_secret_version(
-    PROJECT_NO, "palm2-slack-chatbot-l-signing-secret"
-)
-SLACK_TOKEN = access_secret_version(PROJECT_NO, "palm2-slack-chatbot-l-slack-token")
-RESOURCE_LOCATION = "us-central1"
+def download_blob(bucket_name: str, source_blob_name: str) -> Blob:
+    """
+    google cloud storageからオブジェクトをダウンロード
 
-# Flask
-app = Flask(__name__)
-
-# Slack
-slack_event_adapter = SlackEventAdapter(SIGNING_SECRET, "/slack/events", app)
-slack_client = slack.WebClient(token=SLACK_TOKEN)
-BOT_ID = slack_client.api_call("auth.test")["user_id"]
-
-# VertexAIを初期化
-vertexai.init(project=PROJECT_ID, location=RESOURCE_LOCATION)
-
-parameters = {"temperature": 0.2, "max_output_tokens": 1024, "top_p": 0.8, "top_k": 20}
-model = TextGenerationModel.from_pretrained("text-bison@001")
-
-# Local cache (スケールアップするとき、memorystoreへ移行する必要)
-handled_events = {}
-
-# cloud logging
-logging_client = logging.Client()
-
-# cloud logging: 書き込むログの名前
-logger_name = "palm2_slack_chatbot"
-
-# cloud logging: ロガーを選択する
-logger = logging_client.logger(logger_name)
+    Parameters
+    ----------
+    bucket_name : str
+        バケット名 (gs://を除き)
+    source_blob_name: str
+        ファイル名
+    payload : str
+    """
+    storage_client = storage.Client()
+    bucket = storage_client.bucket(bucket_name)
+    blob = bucket.blob(source_blob_name)
+    return blob
 
 
-def remove_markdown(text):
-    # インラインコードブロックを削除する
-    text = re.sub(r"`(.+?)`", r"\1", text)
-    # マルチラインコードブロックを削除する
-    text = re.sub(r"```(.+?)```", r"\1", text)
-    # ボールドマークダウンを削除する
-    text = re.sub(r"\*\*(.+?)\*\*", r"\1", text)
-    # イタリックマークダウンを削除する
-    text = re.sub(r"\*(.+?)\*", r"\1", text)
-    # ヘッダーマークダウンを---で置き換える
-    text = re.sub(r"^#{1,6}\s*(.+)", r"---\1---", text, flags=re.MULTILINE)
-    return text
+def upload_blob(bucket_name: str, python_object, destination_blob_name: str):
+    """
+    データをGoogle Cloud Storageへアップロード
+    """
+    pickle_object = utils.serialize_to_pickle(python_object)
+    storage_client = storage.Client()
+    bucket = storage_client.bucket(bucket_name)
+    blob = bucket.blob(destination_blob_name)
+    blob.upload_from_string(pickle_object)
 
 
-def get_keyword(prompt: str) -> str:
+def get_keyword(text_model, prompt: str, parameters) -> str:
     """
     キーワードを取得する
 
@@ -152,16 +125,16 @@ def get_keyword(prompt: str) -> str:
     以下の文章からテーマまたコンテキストとなるキーワードを1つ生成してください: {prompt}
     テーマまたコンテキストとなるキーワード:
     """
-    response = model.predict(get_keyword_prompt, **parameters)
+    response = text_model.predict(get_keyword_prompt, **parameters)
     is_blocked = response.is_blocked
     if is_blocked:
         keyword = "入力または出力が Google のポリシーに違反している可能性があるため、出力がブロックされています。プロンプトの言い換えや、パラメータ設定の調整を試してください。現在、英語にのみ対応しています。"
     else:
-        keyword = remove_markdown(response.text)
+        keyword = utils.remove_markdown(response.text)
     return keyword
 
 
-def send_log(user_id: str, prompt: str, payload: str) -> None:
+def send_log(logger, user_id: str, prompt: str, payload: str, keyword: str) -> None:
     """
     ログを送信する
 
@@ -174,7 +147,7 @@ def send_log(user_id: str, prompt: str, payload: str) -> None:
     payload : str
         ペイロード
     """
-    keyword = get_keyword(prompt)
+
     # ログに書き込むデータを持つ辞書を作成する
     data = {
         "slack_user_id": user_id,
@@ -182,63 +155,27 @@ def send_log(user_id: str, prompt: str, payload: str) -> None:
         "response": payload,
         "keyword": keyword,
     }
-    
+
+    # 辞書をJSON文字列に変換する
     logger.log_struct(data)
 
 
-def post_message_if_not_from_bot(
-    ts: str, user_id: str, channel_id: str, prompt: str
-) -> None:
+def store_historical_chat_to_gcs(
+    metadata_chat: str,
+    historical_chat: list,
+    historical_chat_bucket_name: str,
+    historical_chat_blob_name: str,
+):
     """
-    ユーザーIDがボットのIDまたはNoneでなく、かつチャンネルIDが存在する場合、Slackチャンネルにメッセージを投稿する。
+    google cloud storageへcontext及びチャット履歴を保存
 
-    Parameters
-    ----------
-    ts : str
-        メッセージのタイムスタンプ
-    user_id : str
-        ユーザーID
-    channel_id : str
-        チャンネルID
-    prompt : str
-        プロンプト
     """
-    is_handled_event = ts == handled_events.get(f"{channel_id}_{user_id}")
-    is_bot_or_invalid = user_id in (BOT_ID, None)
-
-    if not is_handled_event and not is_bot_or_invalid:
-        handled_events[f"{channel_id}_{user_id}"] = ts
-        slack_client.chat_postMessage(
-            channel=channel_id, thread_ts=ts, text="...処理中..."
-        )
-        response = model.predict(prompt, **parameters)
-        is_blocked = response.is_blocked
-        if is_blocked:
-            payload = "入力または出力が Google のポリシーに違反している可能性があるため、出力がブロックされています。プロンプトの言い換えや、パラメータ設定の調整を試してください。現在、英語にのみ対応しています。"
-        else:
-            payload = remove_markdown(response.text)
-        slack_client.chat_postMessage(channel=channel_id, thread_ts=ts, text=payload)
-        send_log(user_id, prompt, payload)
-
-
-@slack_event_adapter.on("message")
-def handle_incoming_message(payload: dict) -> None:
-    """
-    受信メッセージを処理する
-
-    Parameters
-    ----------
-    payload : dict
-        ペイロード
-    """
-    event = payload.get("event", {})
-    channel_id = event.get("channel")
-    user_id = event.get("user")
-    prompt = event.get("text")
-    ts = event.get("ts")
-
-    post_message_if_not_from_bot(ts, user_id, channel_id, prompt)
-
-
-if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=8080)
+    historical_chat = {
+        "metadata_chat": metadata_chat,
+        "historical_chat": historical_chat,
+    }
+    upload_blob(
+        historical_chat_bucket_name,
+        historical_chat,
+        historical_chat_blob_name,
+    )

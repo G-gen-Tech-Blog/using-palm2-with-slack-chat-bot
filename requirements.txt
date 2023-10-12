@@ -7,7 +7,6 @@ cachetools==5.3.1
 certifi==2023.5.7
 charset-normalizer==3.2.0
 click==8.1.5
-Flask==2.3.2
 frozenlist==1.4.0
 google-api-core==2.11.1
 google-api-python-client==2.93.0
@@ -53,3 +52,6 @@ urllib3==1.26.16
 Werkzeug==2.3.6
 yarl==1.9.2
 zipp==3.16.2
+fastapi==0.103.2
+slack_bolt==1.18.0
+uvicorn==0.23.2

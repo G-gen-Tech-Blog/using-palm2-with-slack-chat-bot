@@ -1,16 +1,15 @@
 import json
 import pickle
 
+from fastapi import FastAPI, Request
 from google.cloud import logging
+from slack_bolt import App
+from slack_bolt.adapter.fastapi import SlackRequestHandler
+from slack_sdk import WebClient
 import vertexai
 from vertexai.language_models import ChatModel, InputOutputTextPair, TextGenerationModel
 
 from modules import gc_utils, utils
-
-from slack_bolt import App
-from slack_bolt.adapter.fastapi import SlackRequestHandler
-
-from slack_sdk import WebClient
 
 # 環境変数を読み込む
 PROJECT_ID, PROJECT_NO = gc_utils.get_project_number()
@@ -29,8 +28,6 @@ HISTORICAL_CHAT_BUCKET_NAME = "historical-chat-object"
 app = App(token=SLACK_TOKEN, signing_secret=SIGNING_SECRET)
 app_handler = SlackRequestHandler(app)
 
-
-from fastapi import FastAPI, Request
 
 api = FastAPI()
 

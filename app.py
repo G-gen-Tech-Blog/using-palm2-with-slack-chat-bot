@@ -7,7 +7,6 @@ from slack_bolt.async_app import AsyncApp
 from slack_bolt.adapter.fastapi.async_handler import AsyncSlackRequestHandler
 from slack_sdk.web.async_client import AsyncWebClient
 
-# from slack_sdk import WebClient
 import vertexai
 from vertexai.language_models import ChatModel, InputOutputTextPair, TextGenerationModel
 

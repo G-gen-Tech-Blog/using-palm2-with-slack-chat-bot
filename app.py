@@ -3,8 +3,10 @@ import pickle
 
 from fastapi import FastAPI, Request
 from google.cloud import logging
-from slack_bolt.async_app import AsyncApp
-from slack_bolt.adapter.fastapi.async_handler import AsyncSlackRequestHandler
+
+from slack_bolt import App
+from slack_bolt.adapter.fastapi import SlackRequestHandler
+
 from slack_sdk.web.async_client import AsyncWebClient
 
 import vertexai
@@ -25,8 +27,8 @@ RESOURCE_LOCATION = "us-central1"
 HISTORICAL_CHAT_BUCKET_NAME = "historical-chat-object"
 
 # FastAPI
-app = AsyncApp(token=SLACK_TOKEN, signing_secret=SIGNING_SECRET)
-app_handler = AsyncSlackRequestHandler(app)
+app = App(token=SLACK_TOKEN, signing_secret=SIGNING_SECRET)
+app_handler = SlackRequestHandler(app)
 api = FastAPI()
 
 
@@ -76,7 +78,7 @@ for item in sample_raws:
 # 本動作はここから
 
 
-async def post_message_if_not_from_bot(
+def post_message_if_not_from_bot(
     client: AsyncWebClient,
     ts: str,
     conversation_thread: str,
@@ -136,7 +138,7 @@ async def post_message_if_not_from_bot(
         payload = utils.remove_markdown(response.text)
 
     # レスポンスをslackへ返す
-    await client.chat_postMessage(channel=channel_id, thread_ts=ts, text=payload)
+    client.chat_postMessage(channel=channel_id, thread_ts=ts, text=payload)
 
     gc_utils.store_historical_chat_to_gcs(
         """dummy_metadata_chat""",
@@ -151,7 +153,7 @@ async def post_message_if_not_from_bot(
 
 
 @app.event("message")
-async def handle_incoming_message(client: AsyncWebClient, payload: dict) -> None:
+def handle_incoming_message(client: AsyncWebClient, payload: dict) -> None:
     """
     受信メッセージを処理する
 
@@ -166,6 +168,6 @@ async def handle_incoming_message(client: AsyncWebClient, payload: dict) -> None
     ts = payload.get("ts")
     thread_ts = payload.get("thread_ts")
     conversation_thread = ts if thread_ts is None else thread_ts
-    await post_message_if_not_from_bot(
+    post_message_if_not_from_bot(
         client, ts, conversation_thread, user_id, channel_id, prompt
     )

@@ -3,7 +3,6 @@ instance_class: F1
 service: palm2-slack-chatbot
 automatic_scaling:
   target_cpu_utilization: 0.90
-  min_idle_instances: 1
   min_instances: 1
   max_instances: 2
 entrypoint: gunicorn -w 2 -k uvicorn.workers.UvicornWorker -b 0.0.0.0:8080 app:api

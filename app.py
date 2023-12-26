@@ -7,7 +7,7 @@ from slack_bolt.adapter.fastapi import SlackRequestHandler
 from slack_sdk.web.async_client import AsyncWebClient
 
 import vertexai
-from vertexai.language_models import ChatModel, InputOutputTextPair, TextGenerationModel
+from vertexai.language_models import TextGenerationModel
 
 from modules import gc_utils, utils
 

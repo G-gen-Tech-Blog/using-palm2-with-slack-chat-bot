@@ -37,7 +37,7 @@ async def endpoint(req: Request):
 # VertexAIを初期化
 vertexai.init(project=PROJECT_ID, location=RESOURCE_LOCATION)
 
-text_model = TextGenerationModel.from_pretrained("text-bison@001")
+text_model = TextGenerationModel.from_pretrained("text-bison")
 PARAMETERS = {
     "max_output_tokens": 1024,
     "temperature": 0.20,
@@ -116,4 +116,5 @@ def handle_incoming_message(client: AsyncWebClient, payload: dict) -> None:
     ts = payload.get("ts")
     thread_ts = payload.get("thread_ts")
     conversation_thread = ts if thread_ts is None else thread_ts
-    generate_response(client, ts, conversation_thread, user_id, channel_id, prompt)
+    generate_response(client, ts, conversation_thread,
+                      user_id, channel_id, prompt)
